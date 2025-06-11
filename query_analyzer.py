@@ -1,3 +1,4 @@
+import mysql.connector
 class Column:
     def __init__(self, name,datatype,size,decimal,is_null,key):
         self.name = name
@@ -113,13 +114,29 @@ def analyze_query(tokens):
 
             
         
+def names_of_tables():
+    conn = mysql.connector.connect(
+    host='localhost',
+    user='root',
+    password='Shiva@2005',
+    database='flight_booking_project'
+    )
 
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = 'flight_booking_project';
+    """)
 
-def is_table(tables,name):
-    for table_name in tables.keys():
-        if( table_name == name): return 1
-    
-    return 0
+    tables = cursor.fetchall()
+    table_names = []
+    for (table_name,) in tables:
+       table_names.append(table_name)
+
+    conn.close()
+    return table_names
+
 
 def column_find(tables,query_tables , name):
     for table_name in query_tables:
@@ -136,62 +153,37 @@ def column_details(table,cname):
     
     return None
 
-def table_description(tokens):
-    table = {}
-    flag = 0
-    name = ""
-    cname = ""
-    datatype = ""
-    size = "NONE"
-    decimal = 0
-    is_null = True
-    pk = "NO"
-    for token in tokens:
-        if token == '\n':
-            if cname != "":
-                colm = Column(cname, datatype, size, decimal, is_null, pk)
-                table[name].add_column(colm)
-            cname = ""
-            datatype = ""
-            size = "NONE"
-            decimal = 0
-            is_null = "false"
-            pk = "NO"
-            flag = 0
+def table_description(table_name , columns):
+    table = Table(table_name)
 
-        elif token == 'desc':
-            flag = 1
-        elif flag == 1:
-            name = token
-            table[name] = Table(name)
-            flag = 0
-        elif cname == "":
-            cname = token
-        elif datatype == "":
-            datatype = token
-        elif token == "(":
-            flag = 2
-        elif token == ",":
-            flag = 3
-        elif flag == 2:
-            size = token
-            flag = 0
-        elif flag == 3:
-            decimal = token
-            flag = 0
-        elif token == "true" or token == "false":
-            is_null = token
-        elif token == "PK":
-            pk = token
+    for column in columns:
+        column_name = column['COLUMN_NAME']
+        data_type = column['DATA_TYPE']
+        is_null = column['IS_NULLABLE']
+        column_type = column['COLUMN_TYPE']
+        size = 0
+        decimal = 0
+        key = "NO"
+        for i in range(len(column_type)) :
+            if( column_type[i] == '('):
+                size = column_type[i + 1]
+            elif( column_type[i] == ','):
+                decimal = column_type[i + 1]
+        colm = Column(column_name , data_type , size , decimal , is_null , key)
+        table.add_column(colm)
+    
     return table
+
 
 def query_table( joins, From):
     alias = {}
     prev = ""
+    names_table = names_of_tables()
+    #print(names_table)
 # dictionary of alais names and their corresponding table
     for word in From:
         if(word == ','): continue 
-        elif(is_table(table,word) == 1): 
+        elif(word in names_table): 
             alias[word] = word
         else: 
             alias[word] =  prev
@@ -202,14 +194,14 @@ def query_table( joins, From):
         if( len(join) > 1) : alias[join[1]] = join[0]
 
     #print( alias)
-    #alias = {value: key for key, value in alias.items()}
+    
 
     return alias
 
 def table_names( dict):
     names = []
     for name in dict.values():
-        names.append( name)
+        if name not in names :names.append( name)
 
     return names
 def field_creation(select,is_function,field_name,columns , table_name, column_alais,table):
@@ -347,6 +339,33 @@ def Select(token,table ,alias , query_tables):
     return select
 
 
+def table_creation( table_names):
+    tables = {}
+    conn = mysql.connector.connect(
+        host = 'localhost' ,
+        user = 'root' ,
+        password = 'Shiva@2005' ,
+        database = 'flight_booking_project'
+    )
+    cursor = conn.cursor(dictionary = True)
+    for name in table_names:
+        cursor.execute(f"""
+        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'flight_booking_project' AND TABLE_NAME = '{name}'
+        """)
+        #print( cursor.fetchall() )
+        tables[name] = table_description(name , cursor.fetchall())
+
+    conn.close()
+
+    return tables
+
+
+    
+    
+    
+
 
 
 
@@ -359,10 +378,10 @@ def Select(token,table ,alias , query_tables):
 
 
 
-file = open(r"C:\Users\kesav\OneDrive\Documents\dummyfile.txt")
-file = file.read()
-tokens = tokenizer(file)
-table = table_description(tokens)
+#file = open(r"C:\Users\kesav\OneDrive\Documents\dummyfile.txt")
+#file = file.read()
+#tokens = tokenizer(file)
+#table = table_description(tokens)
 
 #for i in range(0,len(table[name].columns)):
 #    print(table[name].columns[i].name," ",table[name].columns[i].datatype," ",table[name].columns[i].size," ",table[name].columns[i].decimal," ",table[name].columns[i].is_null," ",table[name].columns[i].key)
@@ -379,6 +398,14 @@ qr = analyze_query(tokens)
 # from and join
 alias = query_table(qr.JOIN, qr.FROM)
 query_tables = table_names(alias)
+table = table_creation(query_tables)
+for table_name , table_desc in table.items():
+    print( table_name , "Table")
+    print(" {:<25} {:<25} {:<10} {:<10} {:<10} {:<10}".format ( "Table Name", "Data Type", "Size", "Decimal", "is null" , " key "))
+    print(" {:<25} {:<25} {:<10} {:<10} {:<10} {:<10}".format ( "---------------", "----------", "-----", "-------", "----------" , "-------"))
+    for column in table_desc.columns:
+        print(" {:<25} {:<25} {:<10} {:<10} {:<10} {:<10}".format ( column.name , column.datatype , column.size , column.decimal , column.is_null , column.key ))
+    print()
 #print(alias)
 #print( qr.SELECT)
 #print(query_tables)
